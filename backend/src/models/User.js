@@ -7,11 +7,6 @@ const userSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
-  lastName: {
-    type: String,
-    required: true,
-    trim: true
-  },
   email: {
     type: String,
     required: true,
@@ -28,27 +23,6 @@ const userSchema = new mongoose.Schema({
     type: String,
     enum: ['guest', 'host', 'admin'],
     default: 'guest'
-  },
-  profilePicture: {
-    type: String,
-    default: ''
-  },
-  bio: {
-    type: String,
-    maxlength: 500
-  },
-  phone: {
-    type: String,
-    trim: true
-  },
-  dateOfBirth: {
-    type: Date
-  },
-  languages: [{
-    type: String
-  }],
-  nationality: {
-    type: String
   },
   verified: {
     type: Boolean,

@@ -1,11 +1,43 @@
 import React, { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { Calendar, Users, CreditCard, Shield, ArrowLeft, ArrowRight } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+
+type ExperienceKey = 'cooking' | 'homestay' | 'cultural';
+
+type BookingData = {
+  experience: ExperienceKey;
+  dates: { checkin: string; checkout: string };
+  guests: number;
+  specialRequests: string;
+  contact: { name: string; email: string; phone: string };
+  payment: { method: string; card: { number: string; expiry: string; cvv: string; name: string } };
+};
+
+interface BookingErrors {
+  dates?: { checkin?: string; checkout?: string };
+  contact?: { name?: string; email?: string; phone?: string };
+  payment?: { card?: { number?: string; expiry?: string; cvv?: string; name?: string } };
+}
 
 const BookingFlow: React.FC = () => {
-  const { id } = useParams();
-  const [currentStep, setCurrentStep] = useState(1);
-  const [bookingData, setBookingData] = useState({
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const { user, isAuthenticated } = useAuth();
+  const [errors, setErrors] = useState<BookingErrors>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const steps = [
+    { id: '1', title: 'Select Experience', icon: Calendar },
+    { id: '2', title: 'Guest Details', icon: Users },
+    { id: '3', title: 'Payment', icon: CreditCard },
+    { id: '4', title: 'Confirmation', icon: Shield }
+  ] as const;
+
+  type StepId = typeof steps[number]['id'];
+  
+  const [currentStep, setCurrentStep] = useState<StepId>('1');
+  const [bookingData, setBookingData] = useState<BookingData>({
     experience: 'cooking',
     dates: { checkin: '', checkout: '' },
     guests: 1,
@@ -14,37 +46,155 @@ const BookingFlow: React.FC = () => {
     payment: { method: 'card', card: { number: '', expiry: '', cvv: '', name: '' } }
   });
 
-  const steps = [
-    { id: 1, title: 'Select Experience', icon: Calendar },
-    { id: 2, title: 'Guest Details', icon: Users },
-    { id: 3, title: 'Payment', icon: CreditCard },
-    { id: 4, title: 'Confirmation', icon: Shield }
-  ];
-
-  const experiences = {
-    cooking: { title: 'Traditional Paella Cooking Class', price: 45, duration: '4 hours' },
+  const experiences: Record<ExperienceKey, { title: string; price: number; duration: string }> = {
+    cooking: { title: 'Traditional Cooking Class', price: 45, duration: '4 hours' },
     homestay: { title: 'Cultural Homestay Experience', price: 35, duration: '2-7 days' },
-    cultural: { title: 'Barcelona Cultural Walking Tour', price: 25, duration: '3 hours' }
+    cultural: { title: 'Cultural Walking Tour', price: 25, duration: '3 hours' }
   };
 
-  const handleNext = () => {
-    if (currentStep < 4) {
-      setCurrentStep(currentStep + 1);
+  const validateStep = (step: StepId): boolean => {
+    const newErrors: BookingErrors = {};
+    let isValid = true;
+
+    switch (step) {
+      case '1':
+        if (!bookingData.dates.checkin) {
+          newErrors.dates = { ...newErrors.dates, checkin: 'Check-in date is required' };
+          isValid = false;
+        }
+        if (!bookingData.dates.checkout) {
+          newErrors.dates = { ...newErrors.dates, checkout: 'Check-out date is required' };
+          isValid = false;
+        }
+        if (bookingData.dates.checkin && bookingData.dates.checkout &&
+            new Date(bookingData.dates.checkin) >= new Date(bookingData.dates.checkout)) {
+          newErrors.dates = { ...newErrors.dates, checkout: 'Check-out date must be after check-in date' };
+          isValid = false;
+        }
+        break;
+
+      case '2':
+        if (!bookingData.contact.name) {
+          newErrors.contact = { ...newErrors.contact, name: 'Name is required' };
+          isValid = false;
+        }
+        if (!bookingData.contact.email) {
+          newErrors.contact = { ...newErrors.contact, email: 'Email is required' };
+          isValid = false;
+        }
+        if (!bookingData.contact.phone) {
+          newErrors.contact = { ...newErrors.contact, phone: 'Phone number is required' };
+          isValid = false;
+        }
+        break;
+
+      case '3':
+        if (!bookingData.payment.card.number) {
+          newErrors.payment = { card: { number: 'Card number is required' } };
+          isValid = false;
+        }
+        if (!bookingData.payment.card.expiry) {
+          newErrors.payment = { ...newErrors.payment, card: { ...newErrors.payment?.card, expiry: 'Expiry date is required' } };
+          isValid = false;
+        }
+        if (!bookingData.payment.card.cvv) {
+          newErrors.payment = { ...newErrors.payment, card: { ...newErrors.payment?.card, cvv: 'CVV is required' } };
+          isValid = false;
+        }
+        if (!bookingData.payment.card.name) {
+          newErrors.payment = { ...newErrors.payment, card: { ...newErrors.payment?.card, name: 'Cardholder name is required' } };
+          isValid = false;
+        }
+        break;
+    }
+
+    setErrors(newErrors);
+    return isValid;
+  };
+
+  const handleSubmit = async () => {
+    try {
+      setIsSubmitting(true);
+      const response = await fetch('http://localhost:3001/api/bookings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({
+          ...bookingData,
+          hostId: id,
+          userId: user?.id,
+          status: 'pending',
+          totalAmount: total * bookingData.guests
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create booking');
+      }
+
+      setCurrentStep('4');
+    } catch (error) {
+      console.error('Booking error:', error);
+      setErrors({ payment: { card: { number: 'Failed to process payment. Please try again.' } } });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleNext = async () => {
+    if (!isAuthenticated) {
+      navigate('/signin');
+      return;
+    }
+
+    if (validateStep(currentStep)) {
+      if (currentStep === '3') {
+        await handleSubmit();
+      } else {
+        const nextStep = steps[steps.findIndex(s => s.id === currentStep) + 1];
+        if (nextStep) {
+          setCurrentStep(nextStep.id);
+        }
+      }
     }
   };
 
   const handlePrevious = () => {
-    if (currentStep > 1) {
-      setCurrentStep(currentStep - 1);
+    const prevStep = steps[steps.findIndex(s => s.id === currentStep) - 1];
+    if (prevStep) {
+      setCurrentStep(prevStep.id);
+      setErrors({});
     }
   };
 
-  const handleInputChange = (section: string, field: string, value: string) => {
+  const handleInputChange = <T extends 'dates' | 'contact'>(
+    section: T,
+    field: keyof BookingData[T],
+    value: string
+  ) => {
     setBookingData(prev => ({
       ...prev,
       [section]: {
         ...prev[section],
         [field]: value
+      }
+    }));
+  };
+
+  const handleCardInputChange = (
+    field: keyof BookingData['payment']['card'],
+    value: string
+  ) => {
+    setBookingData(prev => ({
+      ...prev,
+      payment: {
+        ...prev.payment,
+        card: {
+          ...prev.payment.card,
+          [field]: value
+        }
       }
     }));
   };
@@ -64,29 +214,31 @@ const BookingFlow: React.FC = () => {
         {/* Progress Bar */}
         <div className="bg-white rounded-lg shadow-md p-6 mb-8">
           <div className="flex items-center justify-between">
-            {steps.map((step) => (
+            {steps.map((step, index) => (
               <div key={step.id} className="flex items-center">
                 <div
                   className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                    currentStep >= step.id
+                    steps.findIndex(s => s.id === currentStep) >= index
                       ? 'bg-orange-500 text-white'
                       : 'bg-gray-200 text-gray-600'
                   }`}
                 >
                   <step.icon className="h-5 w-5" />
                 </div>
-                <span
-                  className={`ml-2 text-sm font-medium ${
-                    currentStep >= step.id ? 'text-orange-500' : 'text-gray-600'
-                  }`}
-                >
+                <span className={`ml-2 text-sm font-medium ${
+                  steps.findIndex(s => s.id === currentStep) >= index
+                    ? 'text-orange-500'
+                    : 'text-gray-600'
+                }`}>
                   {step.title}
                 </span>
-                {step.id < steps.length && (
+                {index < steps.length - 1 && (
                   <div className="w-16 h-0.5 bg-gray-200 mx-4 hidden md:block">
                     <div
                       className={`h-full ${
-                        currentStep > step.id ? 'bg-orange-500' : 'bg-gray-200'
+                        steps.findIndex(s => s.id === currentStep) > index
+                          ? 'bg-orange-500'
+                          : 'bg-gray-200'
                       }`}
                     />
                   </div>
@@ -100,7 +252,7 @@ const BookingFlow: React.FC = () => {
           {/* Main Content */}
           <div className="lg:col-span-2">
             <div className="bg-white rounded-lg shadow-md p-6">
-              {currentStep === 1 && (
+              {currentStep === '1' && (
                 <div>
                   <h2 className="text-2xl font-bold text-gray-800 mb-6">Select Your Experience</h2>
                   <div className="space-y-4">
@@ -112,7 +264,7 @@ const BookingFlow: React.FC = () => {
                             ? 'border-orange-500 bg-orange-50'
                             : 'border-gray-200 hover:border-gray-300'
                         }`}
-                        onClick={() => setBookingData(prev => ({ ...prev, experience: key }))}
+                        onClick={() => setBookingData(prev => ({ ...prev, experience: key as ExperienceKey }))}
                       >
                         <h3 className="font-semibold text-gray-800">{experience.title}</h3>
                         <p className="text-sm text-gray-600">{experience.duration}</p>
@@ -130,10 +282,15 @@ const BookingFlow: React.FC = () => {
                         </label>
                         <input
                           type="date"
-                          className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                          className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent ${
+                            errors.dates?.checkin ? 'border-red-500' : 'border-gray-300'
+                          }`}
                           value={bookingData.dates.checkin}
                           onChange={(e) => handleInputChange('dates', 'checkin', e.target.value)}
                         />
+                        {errors.dates?.checkin && (
+                          <p className="mt-1 text-sm text-red-600">{errors.dates.checkin}</p>
+                        )}
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -141,10 +298,15 @@ const BookingFlow: React.FC = () => {
                         </label>
                         <input
                           type="date"
-                          className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                          className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent ${
+                            errors.dates?.checkout ? 'border-red-500' : 'border-gray-300'
+                          }`}
                           value={bookingData.dates.checkout}
                           onChange={(e) => handleInputChange('dates', 'checkout', e.target.value)}
                         />
+                        {errors.dates?.checkout && (
+                          <p className="mt-1 text-sm text-red-600">{errors.dates.checkout}</p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -167,7 +329,7 @@ const BookingFlow: React.FC = () => {
                 </div>
               )}
 
-              {currentStep === 2 && (
+              {currentStep === '2' && (
                 <div>
                   <h2 className="text-2xl font-bold text-gray-800 mb-6">Guest Details</h2>
                   <div className="space-y-4">
@@ -177,10 +339,17 @@ const BookingFlow: React.FC = () => {
                       </label>
                       <input
                         type="text"
-                        className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                        className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent ${
+                          errors.contact?.name ? 'border-red-500' : 'border-gray-300'
+                        }`}
                         value={bookingData.contact.name}
                         onChange={(e) => handleInputChange('contact', 'name', e.target.value)}
+                        placeholder="Enter your full name"
+                        required
                       />
+                      {errors.contact?.name && (
+                        <p className="mt-1 text-sm text-red-600">{errors.contact.name}</p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -188,10 +357,15 @@ const BookingFlow: React.FC = () => {
                       </label>
                       <input
                         type="email"
-                        className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                        className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent ${
+                          errors.contact?.email ? 'border-red-500' : 'border-gray-300'
+                        }`}
                         value={bookingData.contact.email}
                         onChange={(e) => handleInputChange('contact', 'email', e.target.value)}
                       />
+                      {errors.contact?.email && (
+                        <p className="mt-1 text-sm text-red-600">{errors.contact.email}</p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -199,10 +373,15 @@ const BookingFlow: React.FC = () => {
                       </label>
                       <input
                         type="tel"
-                        className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                        className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent ${
+                          errors.contact?.phone ? 'border-red-500' : 'border-gray-300'
+                        }`}
                         value={bookingData.contact.phone}
                         onChange={(e) => handleInputChange('contact', 'phone', e.target.value)}
                       />
+                      {errors.contact?.phone && (
+                        <p className="mt-1 text-sm text-red-600">{errors.contact.phone}</p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -220,7 +399,7 @@ const BookingFlow: React.FC = () => {
                 </div>
               )}
 
-              {currentStep === 3 && (
+              {currentStep === '3' && (
                 <div>
                   <h2 className="text-2xl font-bold text-gray-800 mb-6">Payment Information</h2>
                   <div className="space-y-4">
@@ -231,10 +410,15 @@ const BookingFlow: React.FC = () => {
                       <input
                         type="text"
                         placeholder="1234 5678 9012 3456"
-                        className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                        className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent ${
+                          errors.payment?.card?.number ? 'border-red-500' : 'border-gray-300'
+                        }`}
                         value={bookingData.payment.card.number}
-                        onChange={(e) => handleInputChange('payment', 'card', { ...bookingData.payment.card, number: e.target.value })}
+                        onChange={(e) => handleCardInputChange('number', e.target.value)}
                       />
+                      {errors.payment?.card?.number && (
+                        <p className="mt-1 text-sm text-red-600">{errors.payment.card.number}</p>
+                      )}
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
@@ -244,10 +428,15 @@ const BookingFlow: React.FC = () => {
                         <input
                           type="text"
                           placeholder="MM/YY"
-                          className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                          className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent ${
+                            errors.payment?.card?.expiry ? 'border-red-500' : 'border-gray-300'
+                          }`}
                           value={bookingData.payment.card.expiry}
-                          onChange={(e) => handleInputChange('payment', 'card', { ...bookingData.payment.card, expiry: e.target.value })}
+                          onChange={(e) => handleCardInputChange('expiry', e.target.value)}
                         />
+                        {errors.payment?.card?.expiry && (
+                          <p className="mt-1 text-sm text-red-600">{errors.payment.card.expiry}</p>
+                        )}
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -256,10 +445,15 @@ const BookingFlow: React.FC = () => {
                         <input
                           type="text"
                           placeholder="123"
-                          className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                          className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent ${
+                            errors.payment?.card?.cvv ? 'border-red-500' : 'border-gray-300'
+                          }`}
                           value={bookingData.payment.card.cvv}
-                          onChange={(e) => handleInputChange('payment', 'card', { ...bookingData.payment.card, cvv: e.target.value })}
+                          onChange={(e) => handleCardInputChange('cvv', e.target.value)}
                         />
+                        {errors.payment?.card?.cvv && (
+                          <p className="mt-1 text-sm text-red-600">{errors.payment.card.cvv}</p>
+                        )}
                       </div>
                     </div>
                     <div>
@@ -268,16 +462,21 @@ const BookingFlow: React.FC = () => {
                       </label>
                       <input
                         type="text"
-                        className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                        className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent ${
+                          errors.payment?.card?.name ? 'border-red-500' : 'border-gray-300'
+                        }`}
                         value={bookingData.payment.card.name}
-                        onChange={(e) => handleInputChange('payment', 'card', { ...bookingData.payment.card, name: e.target.value })}
+                        onChange={(e) => handleCardInputChange('name', e.target.value)}
                       />
+                      {errors.payment?.card?.name && (
+                        <p className="mt-1 text-sm text-red-600">{errors.payment.card.name}</p>
+                      )}
                     </div>
                   </div>
                 </div>
               )}
 
-              {currentStep === 4 && (
+              {currentStep === '4' && (
                 <div>
                   <h2 className="text-2xl font-bold text-gray-800 mb-6">Booking Confirmation</h2>
                   <div className="bg-green-50 border border-green-200 rounded-lg p-6 mb-6">
@@ -286,7 +485,7 @@ const BookingFlow: React.FC = () => {
                       <h3 className="text-lg font-semibold text-green-800">Booking Confirmed!</h3>
                     </div>
                     <p className="text-green-700">
-                      Your cultural experience with Maria Santos has been successfully booked. 
+                      Your cultural experience has been successfully booked. 
                       You'll receive a confirmation email shortly with all the details.
                     </p>
                   </div>
@@ -306,7 +505,7 @@ const BookingFlow: React.FC = () => {
                     </div>
                     <div>
                       <h4 className="font-semibold text-gray-800">Total Paid</h4>
-                      <p className="text-gray-600">${total.toFixed(2)}</p>
+                      <p className="text-gray-600">${(total * bookingData.guests).toFixed(2)}</p>
                     </div>
                   </div>
                 </div>
@@ -316,9 +515,9 @@ const BookingFlow: React.FC = () => {
               <div className="flex justify-between mt-8">
                 <button
                   onClick={handlePrevious}
-                  disabled={currentStep === 1}
+                  disabled={currentStep === '1'}
                   className={`flex items-center px-6 py-3 rounded-lg transition-colors ${
-                    currentStep === 1
+                    currentStep === '1'
                       ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                       : 'bg-gray-300 text-gray-700 hover:bg-gray-400'
                   }`}
@@ -327,17 +526,23 @@ const BookingFlow: React.FC = () => {
                   Previous
                 </button>
                 
-                {currentStep < 4 ? (
+                {currentStep !== '4' ? (
                   <button
                     onClick={handleNext}
-                    className="flex items-center px-6 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
+                    disabled={isSubmitting}
+                    className={`flex items-center px-6 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors ${
+                      isSubmitting ? 'opacity-50 cursor-not-allowed' : ''
+                    }`}
                   >
-                    Next
+                    {isSubmitting ? 'Processing...' : 'Next'}
                     <ArrowRight className="h-5 w-5 ml-2" />
                   </button>
                 ) : (
-                  <button className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
-                    Download Receipt
+                  <button 
+                    onClick={() => navigate('/guest-dashboard')}
+                    className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                  >
+                    View My Bookings
                   </button>
                 )}
               </div>

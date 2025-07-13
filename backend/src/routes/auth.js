@@ -10,8 +10,7 @@ const router = express.Router();
 
 // Register
 router.post('/register', [
-  body('firstName').notEmpty().trim().escape(),
-  body('lastName').notEmpty().trim().escape(),
+  body('name').notEmpty().trim().escape(),
   body('email').isEmail().normalizeEmail(),
   body('password').isLength({ min: 6 })
 ], async (req, res) => {
@@ -21,7 +20,10 @@ router.post('/register', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { firstName, lastName, email, password, role = 'guest' } = req.body;
+    const { name, email, password, role = 'guest' } = req.body;
+    // Split name into firstName and lastName
+    const [firstName, ...lastNameParts] = name.split(' ');
+    const lastName = lastNameParts.join(' ') || '';
 
     // Check if user already exists
     const existingUser = await User.findOne({ email });

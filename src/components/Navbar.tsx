@@ -1,9 +1,17 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Menu, X, Globe, User, Heart } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Menu, X, Globe } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 const Navbar: React.FC = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const { user, logout, isAuthenticated } = useAuth();
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    logout();
+    navigate('/');
+  };
 
   return (
     <nav className="bg-white shadow-lg sticky top-0 z-50">
@@ -18,19 +26,34 @@ const Navbar: React.FC = () => {
             <Link to="/search" className="text-gray-700 hover:text-orange-500 transition-colors">
               Find Hosts
             </Link>
-            <Link to="/host-dashboard" className="text-gray-700 hover:text-orange-500 transition-colors">
-              Become a Host
-            </Link>
-            <Link to="/guest-dashboard" className="text-gray-700 hover:text-orange-500 transition-colors">
-              My Trips
-            </Link>
+            {user?.role === 'host' ? (
+              <Link to="/host-dashboard" className="text-gray-700 hover:text-orange-500 transition-colors">
+                Host Dashboard
+              </Link>
+            ) : null}
+            {isAuthenticated ? (
+              <Link to="/guest-dashboard" className="text-gray-700 hover:text-orange-500 transition-colors">
+                My Trips
+              </Link>
+            ) : null}
             <div className="flex items-center space-x-4">
-              <button className="bg-orange-500 text-white px-4 py-2 rounded-lg hover:bg-orange-600 transition-colors">
-                Sign In
-              </button>
-              <button className="border border-orange-500 text-orange-500 px-4 py-2 rounded-lg hover:bg-orange-50 transition-colors">
-                Sign Up
-              </button>
+              {!isAuthenticated ? (
+                <>
+                  <Link to="/signin" className="bg-orange-500 text-white px-4 py-2 rounded-lg hover:bg-orange-600 transition-colors">
+                    Sign In
+                  </Link>
+                  <Link to="/signup" className="border border-orange-500 text-orange-500 px-4 py-2 rounded-lg hover:bg-orange-50 transition-colors">
+                    Sign Up
+                  </Link>
+                </>
+              ) : (
+                <div className="flex items-center space-x-4">
+                  <span className="text-gray-700">Welcome, {user?.name}!</span>
+                  <button onClick={handleLogout} className="text-gray-700 hover:text-orange-500 transition-colors">
+                    Logout
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
